@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evalyn - Answer Sheet Evaluator</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f27; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #3b5bdb; --accent-text: #ffffff; --pass: #1f8a4c; --pass-bg: #e3f5ea;
+    --fail: #c0392b; --fail-bg: #fbe8e5; --warn: #9a6700; --warn-bg: #fff4d6; --bar: #e8ebf1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161b; --card: #1d2027; --text: #e8eaf0; --muted: #98a1b3; --line: #2e333d;
+      --accent: #7c93ff; --accent-text: #101322; --pass: #5fd18b; --pass-bg: #17301f;
+      --fail: #ff8d80; --fail-bg: #3a1b18; --warn: #f2c14e; --warn-bg: #3a2f12; --bar: #2a2f39;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 1.7rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  .drops { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px 14px; text-align: center;
+          cursor: pointer; transition: border-color .15s, background .15s; display: block; }
+  .drop:hover, .drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  .drop.has { border-style: solid; border-color: var(--pass); }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .drop b { display: block; margin-bottom: 2px; }
+  .drop span { color: var(--muted); font-size: .9rem; word-break: break-all; }
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
+  label.f { display: block; font-size: .9rem; color: var(--muted); }
+  label.f input { display: block; width: 100%; margin-top: 4px; padding: 9px 11px; font: inherit; color: var(--text);
+                  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 11px 20px; cursor: pointer;
+           background: var(--accent); color: var(--accent-text); }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  button:disabled { opacity: .6; cursor: progress; }
+  .actions { margin-top: 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .spin { display: none; width: 18px; height: 18px; border: 3px solid var(--line); border-top-color: var(--accent);
+          border-radius: 50%; animation: s .8s linear infinite; }
+  .busy .spin { display: inline-block; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  .note { color: var(--muted); font-size: .9rem; }
+  .error { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: var(--fail-bg); color: var(--fail); }
+  .warn { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); }
+  details { margin-top: 18px; }
+  summary { cursor: pointer; color: var(--accent); }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; overflow-x: auto;
+        font-size: .85rem; line-height: 1.45; }
+  #result { margin-top: 24px; display: none; }
+  .head { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: space-between; }
+  .student { color: var(--muted); }
+  .student b { color: var(--text); }
+  .score { font-size: 2.4rem; font-weight: 700; line-height: 1; }
+  .score small { font-size: 1rem; color: var(--muted); font-weight: 500; }
+  .badge { display: inline-block; padding: 6px 16px; border-radius: 999px; font-weight: 700; letter-spacing: .04em; }
+  .badge.PASS { background: var(--pass-bg); color: var(--pass); }
+  .badge.FAIL { background: var(--fail-bg); color: var(--fail); }
+  table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+  th, td { text-align: left; padding: 10px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border-top: 0; }
+  td.q { font-weight: 700; white-space: nowrap; }
+  td.m { white-space: nowrap; min-width: 110px; }
+  .bar { height: 6px; background: var(--bar); border-radius: 4px; margin-top: 5px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+  .tag { font-size: .72rem; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
+         margin-left: 6px; vertical-align: middle; }
+  .tag.rv { color: var(--warn); border-color: var(--warn); }
+  @media (max-width: 640px) { .drops, .opts { grid-template-columns: 1fr; } th:nth-child(2), td.t { display: none; } }
+  @media print { form, .actions, details, .drops, .opts, .sub, h1 { display: none !important; }
+                 body { background: #fff; color: #000; } .card { border: 0; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Evalyn</h1>
+  <h1>Answer Sheet Evaluator</h1>
+  <p class="sub">Upload a typed answer key and a student’s answer sheet (PDF) with selectable text to get question-wise marks, a total and a Pass/Fail result. Scanned and handwritten pages aren't supported.</p>
+
+  <form id="form" class="card" novalidate>
+    <div class="drops">
+      <label class="drop" id="drop-key">
+        <input type="file" name="answer_key" accept="application/pdf,.pdf" required>
+        <b>Answer key PDF</b><span>Click or drop a file here</span>
+      </label>
+      <label class="drop" id="drop-sheet">
+        <input type="file" name="answer_sheet" accept="application/pdf,.pdf" required>
+        <b>Student answer sheet PDF</b><span>Click or drop a file here</span>
+      </label>
+    </div>
+    <div class="opts">
+      <label class="f">Pass mark (%)
+        <input type="number" name="pass_percent" value="40" min="0" max="100" step="1">
+      </label>
+      <label class="f">Student name (optional)
+        <input type="text" name="student" maxlength="80" placeholder="Read from the sheet if left blank">
+      </label>
+    </div>
+    <div class="actions">
+      <button type="submit" id="go">Evaluate</button>
+      <span class="spin" aria-hidden="true"></span>
+      <span class="note" id="status"></span>
+    </div>
+    <div class="error" id="error" role="alert" hidden></div>
+
+    <details>
+      <summary>Answer key format</summary>
+      <p class="note">One block per question. Types: <code>mcq</code>, <code>tf</code>, <code>blank</code>, <code>numeric</code>, <code>short</code>, <code>long</code>.
+        Student answers should start with <code>1.</code>, <code>Q1</code> or similar.</p>
+      <p class="note">Both PDFs must contain selectable typed text. Scanned and handwritten pages aren't supported.</p>
+<pre>Q1 [2 marks] [type: mcq]
+Question: Which organelle is the powerhouse of the cell?
+Answer: B
+
+Q5 [5 marks] [type: short]
+Question: What is photosynthesis?
+Answer: The process by which plants make glucose from CO2 and water using sunlight.
+Keywords: chlorophyll, sunlight, glucose
+
+Q6 [10 marks] [type: long]
+Question: Explain the water cycle.
+Answer: ...
+Rubric:
+- Definition 2 marks
+- Process 8 marks</pre>
+    </details>
+  </form>
+
+  <section id="result" class="card" aria-live="polite">
+    <div class="head">
+      <div>
+        <div class="student">Student: <b id="r-student"></b></div>
+        <div class="score"><span id="r-total"></span><small> / <span id="r-max"></span> &nbsp;(<span id="r-pct"></span>%)</small></div>
+      </div>
+      <div><span class="badge" id="r-badge"></span><div class="note" id="r-pass" style="margin-top:6px;text-align:right"></div></div>
+    </div>
+    <div class="warn" id="r-warn" hidden>Some written answers need human review because marks use approximate keyword matching.</div>
+    <table>
+      <thead><tr><th>Q</th><th>Type</th><th>Marks</th><th>Feedback</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="actions">
+      <button type="button" class="ghost" id="print">Print</button>
+      <button type="button" class="ghost" id="dl">Download JSON</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const form = $('form');
+let lastResult = null;
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;       // textContent only: feedback is untrusted text
+  return n;
+}
+const fmt = n => String(Number.isInteger(n) ? n : +n.toFixed(2));
+
+function wireDrop(dropId) {
+  const drop = $(dropId), input = drop.querySelector('input'), label = drop.querySelector('span');
+  const idle = label.textContent;
+  const sync = () => {
+    const f = input.files[0];
+    label.textContent = f ? f.name : idle;
+    drop.classList.toggle('has', !!f);
+  };
+  input.addEventListener('change', sync);
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => {
+    if (e.dataTransfer.files.length) { input.files = e.dataTransfer.files; sync(); }
+  });
+}
+wireDrop('drop-key'); wireDrop('drop-sheet');
+
+function showError(msg) { const e = $('error'); e.textContent = msg; e.hidden = !msg; }
+
+function render(d) {
+  lastResult = d;
+  $('r-student').textContent = d.student;
+  $('r-total').textContent = fmt(d.total);
+  $('r-max').textContent = fmt(d.maximum);
+  $('r-pct').textContent = Math.round(d.percent);
+  const b = $('r-badge'); b.textContent = d.result + (d.provisional ? ' (provisional)' : ''); b.className = 'badge ' + d.result;
+  $('r-pass').textContent = 'Pass mark: ' + fmt(d.pass_percent) + '%';
+  $('r-warn').hidden = !d.provisional;
+  const tbody = $('rows'); tbody.replaceChildren();
+  for (const r of d.results) {
+    const tr = el('tr');
+    tr.append(el('td', 'q', 'Q' + r.qno), el('td', 't', r.type));
+    const m = el('td', 'm', fmt(r.awarded) + ' / ' + fmt(r.maximum));
+    const bar = el('div', 'bar'), fill = el('i');
+    fill.style.width = (r.maximum ? Math.min(100, r.awarded / r.maximum * 100) : 0) + '%';
+    bar.append(fill); m.append(bar);
+    const f = el('td', '', r.feedback);
+    if (r.flagged) f.append(el('span', 'tag rv', 'review'));
+    tr.append(m, f); tbody.append(tr);
+  }
+  $('result').style.display = 'block';
+  $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  showError('');
+  if (!form.answer_key.files[0] || !form.answer_sheet.files[0]) { showError('Please choose both PDF files.'); return; }
+  $('result').style.display = 'none';
+  form.classList.add('busy'); $('go').disabled = true;
+  $('status').textContent = 'Reading PDFs and grading…';
+  try {
+    const res = await fetch('/api/evaluate', { method: 'POST', body: new FormData(form) });
+    const data = await res.json().catch(() => ({ error: 'Unexpected response from the server.' }));
+    if (!res.ok) throw new Error(data.error || 'Request failed.');
+    render(data);
+  } catch (err) {
+    showError(err.message || 'Network error.');
+  } finally {
+    form.classList.remove('busy'); $('go').disabled = false; $('status').textContent = '';
+  }
+});
+
+$('print').addEventListener('click', () => window.print());
+$('dl').addEventListener('click', () => {
+  if (!lastResult) return;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(lastResult, null, 2)], { type: 'application/json' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: 'evaluation-result.json' });
+  a.click(); URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>
