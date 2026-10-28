@@ -24,6 +24,10 @@ OBJECTIVE_TYPES = {"mcq", "tf", "blank", "numeric"}
 NUMBER_PATTERN = re.compile(
     r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?(?:[eE][-+]?\d+)?"
 )
+NUMERIC_ANSWER_PATTERN = re.compile(
+    r"^\s*[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
+    r"(?:[eE][-+]?\d+)?(?:\s*[A-Za-z%°²³/^.-][A-Za-z0-9%°²³/^.-]*)*\s*$"
+)
 
 
 def extract_pdf_text(pdf_source, source_name: str = "PDF") -> str:
@@ -51,13 +55,40 @@ def extract_pdf_text(pdf_source, source_name: str = "PDF") -> str:
 
 def split_questions(text: str) -> dict[int, str]:
     matches = list(QUESTION_START.finditer(text))
-    questions = {}
-    for index, match in enumerate(matches):
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        block = text[match.end():end].strip()
-        block = re.sub(r"^[.):\]-]\s*", "", block)
-        questions[int(match.group(1))] = block
-    return questions
+    return {
+        int(match.group(1)): re.sub(
+            r"^[.):\]-]\s*", "",
+            text[match.end():matches[i + 1].start() if i + 1 < len(matches) else len(text)].strip(),
+        )
+        for i, match in enumerate(matches)
+    }
+
+
+def infer_question_type(
+    question_text: str,
+    answer: str,
+    marks: float,
+    has_rubric: bool,
+    question_block: str,
+) -> str:
+    answer_normalized = normalize(answer)
+    if answer_normalized in {"true", "false", "yes", "no"}:
+        return "tf"
+    if re.fullmatch(r"[a-d]", answer_normalized):
+        return "mcq"
+    if NUMERIC_ANSWER_PATTERN.fullmatch(answer):
+        return "numeric"
+    if re.search(
+        r"_{2,}|(?:fill|complete)\s+in\s+(?:the\s+)?blank",
+        question_text,
+        re.I,
+    ):
+        return "blank"
+    if re.search(r"(?im)^\s*(?:\([A-D]\)|[A-D][.)])\s+\S", question_block):
+        return "mcq"
+    if has_rubric or marks >= 8:
+        return "long"
+    return "short"
 
 
 def parse_answer_key(text: str) -> dict[int, dict[str, object]]:
@@ -65,27 +96,29 @@ def parse_answer_key(text: str) -> dict[int, dict[str, object]]:
     for number, block in split_questions(text).items():
         marks_match = re.search(r"\[(\d+(?:\.\d+)?)\s*marks?\]", block, re.I)
         type_match = re.search(r"\[type:\s*(\w+)\s*\]", block, re.I)
-        answer_match = re.search(
-            r"(?ims)^\s*Answer:\s*(.*?)(?=^\s*(?:Keywords:|Rubric:)|\Z)",
-            block,
-        )
+        answer_match = re.search(r"(?ims)^\s*Answer:\s*(.*?)(?=^\s*(?:Keywords:|Rubric:)|\Z)", block)
         if not answer_match:
             continue
 
-        keyword_match = re.search(r"(?im)^\s*Keywords:\s*(.*)$", block)
-        keywords = []
-        if keyword_match:
-            keywords = [
-                word.strip()
-                for word in re.split(r"[,;]", keyword_match.group(1))
-                if word.strip()
-            ]
-
+        answer = answer_match.group(1).strip()
+        marks = float(marks_match.group(1)) if marks_match else 1.0
+        question_text = re.sub(
+            r"(?im)^\s*Question:\s*|\[(?:\d+(?:\.\d+)?\s*marks?|type:\s*\w+)\]",
+            "", block[:answer_match.start()],
+        )
+        keywords = re.search(r"(?im)^\s*Keywords:\s*(.*)$", block)
         questions[number] = {
-            "answer": answer_match.group(1).strip(),
-            "marks": float(marks_match.group(1)) if marks_match else 1.0,
-            "type": type_match.group(1).lower() if type_match else "short",
-            "keywords": keywords,
+            "answer": answer,
+            "marks": marks,
+            "type": type_match.group(1).lower() if type_match else infer_question_type(
+                question_text, answer, marks,
+                bool(re.search(r"(?im)^\s*Rubric:", block)), block,
+            ),
+            "keywords": [
+                word.strip()
+                for word in re.split(r"[,;]", keywords.group(1))
+                if word.strip()
+            ] if keywords else [],
         }
     return questions
 
